@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Peace In The Neighborhood</title>
+	<!-- Did I spell that right? 
+			~ John Jelatis, 2018	-->
+	<meta name='apple-mobile-web-app-capable' content='yes' />
+	<meta name='mobile-web-app-capable' content='yes' />
+	<style>
+		canvas {
+			background: black;
+		}
+		* {
+			position: absolute;
+			padding: 0;
+			margin: 0;
+			overflow: hidden;
+		}
+		body {
+			width: 100vw;
+			height: 100vh;
+		}
+	</style>
+</head>
+<body>
+	<canvas width=1024 height=768></canvas>
+	<script>
+		var TILE_SIZE_X = 63,
+			TILE_SIZE_Y = 63,
+			GRID_SIZE_X = 16,
+			GRID_SIZE_Y = 12;
+
+		function SpriteSheet(input) {
+			this.img = new Image;
+			this.img.src = input;
+			this.spritesheet = {};
+			this.cached = {};
+			this.get = (id, dmg = 1)=>{
+				if((id + ":" + dmg) in this.cached) {
+					return this.cached[id + ":" + dmg];
+				} else {
+					this.cached[id + ":" + dmg] = document.createElement('canvas');
+					this.cached[id + ":" + dmg].width = TILE_SIZE_X;
+					this.cached[id + ":" + dmg].height = TILE_SIZE_Y;
+					let c = this.cached[id + ":" + dmg].getContext('2d');
+					c.drawImage(this.img, this.spritesheet[id][0], this.spritesheet[id][1] + (this.spritesheet[id][3] * (dmg)), this.spritesheet[id][2], this.spritesheet[id][3], 0, 0, TILE_SIZE_X, TILE_SIZE_Y);
+					return this.cached[id + ":" + dmg];
+				}
+			};
+			this.add = (x,y,w,h,id,numeric_id)=>{
+				this.spritesheet[id] = [x,y,w,h];
+				this.spritesheet[numeric_id] = this.spritesheet[id];
+			};
+		};
+
+		function Tile(X = 0, Y = 0, ID = 'rpg:stone', DMG = 0) {
+			this.x = X;
+			this.y = Y;
+			this.id = ID;
+			this.dmg = DMG;
+			this.x_size = TILE_SIZE_X;
+			this.y_size = TILE_SIZE_Y;
+			this.texture = [];
+			this.render = (c, ss)=>{
+				c.save();
+				c.translate(this.x, this.y);
+				// if(this.id == 1 && X == Y && Y == 1) console.log(this.dmg);
+				c.drawImage(ss.get(this.id, this.dmg), this.x * this.x_size, this.y * this.y_size, this.x_size, this.y_size);
+				c.restore();
+			}
+		};
+
+		function Room(id, type, map) {
+			this.id = id;
+			this.type = type;
+			this.tiles = [];
+			this.map = (map != undefined && map && 'level' in map) ? map.level : map;
+			this.chests = (map != undefined && map && 'chests' in map) ? map.chests : [];
+			this.enemies = (map != undefined && map && 'enemies' in map) ? map.enemies : [];
+			this.entities = [];
+			for(var i in this.enemies) {
+				var e = this.enemies[i];
+				this.entities.push(new Enemy(e.texture, e.x, e.y, e.hp, e.speed, e.MAX_DIST_CHASE, e.power));
+			};
+			if(this.map && this.map.length === 16*12) {
+				for(var i = 0; i < this.map.length; i++) {
+					this.tiles.push(new Tile(Math.floor(i % 16), Math.floor(i / 16), this.map[i], this.type))
+				};
+			} else {
+				for(var i = 0; i < 16*12; i++) {
+					this.tiles.push(new Tile(Math.floor(i % 16), Math.floor(i / 16), 'rpg:grass', this.type));
+				};
+			};
+			this.render = (c, ss)=>{
+				for(var i in this.tiles) {
+					this.tiles[i].render(c, ss);
+				};
+				for(var i in this.enemies) {
+					this.entities[i].render(c, ss);
+				};
+			};
+			this.doTick = (player)=>{
+				for(var i in this.entities) {
+					this.entities[i].doTick(player);
+				};
+			};
+			this.openChest = (player, chest_pos)=>{
+				if(this.chests !== []) {
+					for(var i in this.chests) {
+						var tid = this.chests[i].tileID;
+						var pos = (chest_pos[0] + (chest_pos[1] * 16));
+						if(tid == pos || tid++ == pos || tid-- == pos) {
+							if(!this.chests[i].used) {
+								player.inventory.addItem(this.chests[i].id,this.chests[i].dmg,this.chests[i].quantity,this.chests[i].data);
+								this.chests[i].used = true;
+							};
+							return;
+						};
+					};
+				}
+			};
+		};
+		Room.TYPE_OUTSIDE = 0;
+		Room.TYPE_INSIDE = 1;
+		Room.TYPE_UNDERGROUND = 2;
+
+		function Map(levels_json) {
+			this.reloadRoom = ()=>{};
+			this.getRoom = ()=>([parseInt(this.currentRoom[0]), parseInt(this.currentRoom[1]), parseInt(this.currentRoom[2])]);
+			this.setRoom = (room_x, room_y, room_z)=>{this.currentRoom = [parseInt(room_x), parseInt(room_y), parseInt(room_z)]};
+			this.doTick = (player)=>{
+				this.rooms[this.getRoom().join(',')].doTick(player);
+			};
+			this.render = (c,ss)=>{
+				var room = (this.rooms[this.getRoom().join(',')]);
+				if(room == undefined) {
+					this.rooms[this.getRoom().join(',')] = new Room(0, Room.TYPE_OUTSIDE);
+				};
+				room.render(c,ss);
+			};
+			this.rooms = {
+				"1,1,0": new Room(0, Room.TYPE_OUTSIDE, levels_json[0]),
+				"2,1,0": new Room(1, Room.TYPE_OUTSIDE, levels_json[1]),
+				"3,1,0": new Room(1, Room.TYPE_OUTSIDE, levels_json[2]),
+				"0,1,0": new Room(-1, Room.TYPE_OUTSIDE, levels_json[-1]),
+				"1,0,0": new Room(-5, Room.TYPE_OUTSIDE, levels_json[-5]),
+				"0,0,0": new Room(-6, Room.TYPE_OUTSIDE, levels_json[-6]),
+				"0,0,-1": new Room(-16, Room.TYPE_UNDERGROUND, levels_json[-16])
+			};
+			this.check = (x,y)=>{
+				var n = Math.floor(x) + Math.floor(y)*16;
+				if(n > this.rooms[this.getRoom().join(',')].tiles.length) {return Infinity}
+				return this.rooms[this.getRoom().join(',')].tiles[n].id + ":" + this.rooms[this.getRoom().join(',')].tiles[n].dmg;
+			};
+			this.setRoom(1, 1, 0);
+		};
+		function ItemStack(id, quantity, dmg) {
+			this.quantity = quantity;
+			this.itemID = id;
+			this.damage = dmg;
+			this.apply = (data={})=>{
+				for(var i in data) {
+					this[i] = data[i];
+				};
+			};
+		};
+		function Inventory(size) {
+			this.size = size;
+			this.items = [];
+			this.addItem = (id=1,dmg=0,quantity=1,data={})=>{
+				var item = new ItemStack(id, quantity, dmg);
+				item.apply(data);
+				this.items.push(item);
+			};
+			this.hasItem = (id)=>{
+				for(var i in this.items) {
+					if(this.items[i].itemID == id) {
+						return true;
+					};
+				};
+				return false;
+			};
+			this.render = (c, ss)=>{
+				c.save();
+				c.translate(8, 712);
+				for(var i = 0; (i < this.items.length || i < this.size) && i < 8; i++) {
+					var dmg = 0;
+					if(i in this.items) {
+						dmg ++;
+						if(this.items[i].quantity > 1) {
+							dmg ++;
+						};
+						c.drawImage(ss.get(this.items[i].itemID,0), 0, 0, 48, 48);
+					};
+					c.drawImage(ss.get(70, dmg), 0, 0, 48, 48);
+					if(i in this.items) {
+						c.drawImage(ss.get(this.items[i].itemID,0), 0, 0, 48, 48);
+					};
+					c.translate(64, 0);
+				};
+				c.restore();
+			};
+		};
+		function Enemy(type = 'rpg:enemy_1', x = 8, y = 6, hp = Infinity, speed = 8, MDC = 4, power) {
+			this.power = power
+			this.dmg = 3;
+			this.hp = 5;
+			this.speed = speed;
+			this.drops = new ItemStack('rpg:cookie', 3, 0);
+			this.textureID = type;
+			this.x = x * TILE_SIZE_X;
+			this.y = y * TILE_SIZE_Y;
+			this.velX = 0;
+			this.velY = 0;
+			this.x_size = TILE_SIZE_X * 0.625;
+			this.y_size = TILE_SIZE_Y;
+			this.MAX_DIST_CHASE = MDC;
+			this.render = (c, ss)=>{
+				if(this.hp <= 0) return;
+				c.save();
+				c.translate(this.x, this.y);
+				c.drawImage(ss.get(this.textureID, this.dmg), 0, 0, this.x_size, this.y_size);
+				c.restore();
+			};
+			this.doTick = (p)=>{
+				if(this.hp <= 0) return;
+				this.x += this.velX;
+				this.y += this.velY;
+				var dist = Math.sqrt(Math.pow(p.x - this.x, 2) + Math.pow(p.y - this.y, 2))
+				if(dist < 1 * ((TILE_SIZE_X + TILE_SIZE_Y)/2)) {
+					p.hp -= this.power / 3;
+				} else if(dist < (this.MAX_DIST_CHASE * ((TILE_SIZE_X + TILE_SIZE_Y) / 2))) {
+					if(p.x < this.x) this.velX = -this.speed;
+					if(p.x > this.x) this.velX = +this.speed;
+					if(p.y < this.y) this.velY = -this.speed;
+					if(p.y > this.y) this.velY = +this.speed;
+				} else {
+					this.velX = this.velY = 0;
+				}
+				if(Math.floor(p.y/12) == Math.floor(this.y/12)) this.velY = 0;
+				if(Math.floor(p.x/16) == Math.floor(this.x/16)) this.velX = 0;
+				if(this.velY < 0) this.dmg = 0;
+				if(this.velX > 0) this.dmg = 1;
+				if(this.velX < 0) this.dmg = 2;
+				if(this.velY > 0) this.dmg = 3;
+			};
+		};
+		function Player(x = 512, y = 384) {
+			this.dmg = 0;
+			this.maxHP = 5;
+			this.hp = 5;
+			this.inventory = new Inventory(8);
+			this.textureID = 'rpg:player';
+			this.velX = this.velY = 0;
+			this.x = x + TILE_SIZE_X * 0.125;
+			this.y = y;
+			this.x_size = TILE_SIZE_X * 0.75;
+			this.y_size = TILE_SIZE_Y;
+			this.speed = ()=>{
+				var base = 8;
+				if(this.inventory.hasItem('rpg:cookie')) base += 4;
+				return base;
+			};
+			this.render = (c, ss)=>{
+				c.save();
+				c.translate(this.x, this.y);
+				c.drawImage(ss.get(this.textureID, this.dmg), 0, 0, this.x_size, this.y_size);
+				c.restore();
+				c.save();
+				c.translate(520, 720);
+				c.fillStyle = 'rgba(0, 0, 0, 0.9)';
+				c.fillRect(0, 0, 496, 40);
+				c.fillStyle = 'rgba(180, 0, 0, 0.6)';
+				c.fillRect((this.hp / this.maxHP) * 496, 4, 496 - ((this.hp / this.maxHP) * 496), 32);
+				c.fillStyle = 'rgba(0, 255, 0, 0.6)';
+				c.fillRect(0, 4, ((this.hp / this.maxHP) * 496), 32);
+				c.restore();
+				this.inventory.render(c, ss);
+			};
+			this.doTick = (map, game)=>{
+				var enemies = map.rooms[map.getRoom().join(',')].entities;
+				var closest = undefined;
+				var dist = Infinity;
+				for(var i in enemies) {
+					var dist2 = Math.sqrt(Math.pow(enemies[i].x - this.x, 2) + Math.pow(enemies[i].y - this.y, 2));
+					dist2 /= ((TILE_SIZE_X + TILE_SIZE_Y) / 2);
+					if(dist2 <= dist) {
+						closest = enemies[i];
+						dist = dist2;
+					};
+				};
+				if(this.inventory.hasItem('rpg:sword') && (dist < 5)) {
+					closest.hp -= 0.125;
+				};
+				if(this.inventory.hasItem('rpg:poison') && (dist < 5)) {
+					this.hp += 0.125;
+				};
+				this.hp += 0.0005;
+				if(this.hp > this.maxHP) this.hp = this.maxHP;
+				if(this.hp <= 0) {
+					this.hp = 5;
+					Notification.push("You died!");
+					map.setRoom(1, 1, 0);
+					// game.loadData();
+				};
+				this.x += this.velX;
+				this.y += this.velY;
+				if(this.velX > 0) this.dmg = 1;
+				if(this.velX < 0) this.dmg = 2;
+				if(this.velY > 0) this.dmg = 3;
+				if(this.velY < 0) this.dmg = 0;
+				var W = 1024;
+				var H = 768;
+				if(this.y < -this.y_size) {
+					this.y = H-this.y_size-1;
+					var crRoom = map.getRoom();
+					crRoom[1] --;
+					map.setRoom(...crRoom);
+				};
+				if(this.x < -this.x_size) {
+					this.x = W-this.x_size-1;
+					var crRoom = map.getRoom();
+					crRoom[0] --;
+					map.setRoom(...crRoom);
+				};
+				if(this.y > H-this.y_size) {
+					this.y = this.y_size+1;
+					var crRoom = map.getRoom();
+					crRoom[1] ++;
+					map.setRoom(...crRoom);
+				};
+				if(this.x > W-this.x_size) {
+					this.x = this.x_size+1;
+					var crRoom = map.getRoom();
+					crRoom[0] ++;
+					map.setRoom(...crRoom);
+				};
+			};
+			this.keypress = (code, down, map)=>{
+				if(code == 87 || code == code == 38) {
+					this.velY = down ? -this.speed() : 0;
+				} else if(code == 83 || code == code == 40) {
+					this.velY = down ? this.speed() : 0;
+				};
+				if(code == 65 || code == code == 37) {
+					this.velX = down ? -this.speed() : 0;
+				} else if(code == 68 || code == code == 39) {
+					this.velX = down ? this.speed() : 0;
+				};
+				if((code == 32 || code == 13 || code == 67) && down) {
+					var tileID = map.check(Math.floor(this.x / TILE_SIZE_X), Math.floor(this.y / TILE_SIZE_Y)).split(':')[0];
+					if(tileID == '5') {
+						map.setRoom(...((m)=>{
+							var a = m.getRoom();
+							var b = a;
+							b[2] = b[2] == 0 ? -1 : 0;
+							return b;
+						})(map));
+					} else if(tileID == '6' || tileID == '7') {
+						map.rooms[map.getRoom().join(',')].openChest(this, [Math.floor(this.x / TILE_SIZE_X), Math.floor(this.y / TILE_SIZE_Y)]);
+					};
+				};
+			};
+		};
+
+		function NotificationManager(ctx) {
+			this.cv = ctx.canvas;
+			this.ctx = ctx.canvas.getContext('2d');
+			function Notif(text, timeout = 5000) {
+				setTimeout(this.fadeout.bind(this), timeout * 0.75);
+				this.fadeout = ()=>{};
+				this.opacity = 100;
+				//
+			};
+			this.push = ()=>{}
+		};
+
+		function Game() {
+			var response = new XMLHttpRequest();
+			response.open("GET", "levels.json");
+			response.send();
+			response.onload = ((e)=>{
+				this.map = new Map(JSON.parse(response.responseText)['rooms'])
+			}).bind(this);
+			this.level = 1;
+			this.spritesheet = new SpriteSheet('spritesheet.png');
+			this.character = new Player();
+			this.cv = document.querySelector('canvas');
+			this.ctx = this.cv.getContext('2d');
+			this.Notification = new NotificationManager(this.ctx);
+			this.ctx.mozImageSmoothingEnabled = false;
+			this.ctx.webkitImageSmoothingEnabled = false;
+			this.ctx.msImageSmoothingEnabled = false;
+			this.ctx.imageSmoothingEnabled = false;
+			this.loadData = ()=>{
+				if('cookie' in document && document.cookie && document.cookie !== '' && document.cookie !== undefined) {
+					console.log("Save data detected: " + document.cookie);
+					var savedData = document.cookie.split(/(, |,)/gi);
+					for(var s in savedData) {
+						var var_name = savedData[s].split('=')[0],
+							var_value = savedData[s].split('=')[1];
+						if(var_name == 'room') {
+							this.map.setRoom(...var_value.split(','));
+						} else if(var_name == 'level') {
+							this.setLevel(parseInt(var_value));
+						} else {
+							console.log('Unknown variable: \n' + var_name + '=' + var_value);
+						};
+					};
+				} else {
+					console.log("No save data detected, assuming new player");
+					this.saveData();
+				};
+			};
+			this.saveData = ()=>{
+				var cookie = [
+					`room=${this.map.getRoom().join(',')}; expires=Fri, 01 Jan, 2038 00:00:01 GMT`,
+					`level=${this.getLevel()}; expires=Fri, 01 Jan, 2038 00:00:01 GMT`
+				];
+				for(var id = 0; id < cookie.length; id ++) {
+					document.cookie = cookie[id];
+				};
+				console.log("Saved data!");
+			};
+			this.deleteData = ()=>{
+				document.cookie = `room=; expires=Thurs, 27 May, 2004 00:00:01;`;
+				document.cookie = `level=; expires=Thurs, 27 May, 2004 00:00:01;`;
+				document.cookie = `expires=; expires=Thurs, 27 May, 2004 00:00:01;`;
+				document.cookie = `undefined=; expires=Thurs, 27 May, 2004 00:00:01`;
+			};
+			this.getLevel = ()=>{
+				return this.level;
+			};
+			this.setLevel = (lvl)=>{
+				this.level = lvl;
+			};
+			this.render = ()=>{
+				this.ctx.fillStyle = 'black';
+				this.ctx.fillRect(0, 0, this.cv.width, this.cv.height);
+				this.map.render(this.ctx, this.spritesheet);
+				this.character.render(this.ctx, this.spritesheet);
+			};
+			this.doTick = ()=>{
+				this.map.doTick(this.character);
+				this.character.doTick(this.map, this);
+			};
+			this.sendKeyEvent = (kc,kd)=>{
+				this.character.keypress(kc,kd,this.map);
+			};
+		};
+
+
+		//
+		
+		var GameObject = new Game();
+		var Notification = GameObject.Notification;
+
+		with(GameObject.spritesheet) {
+			add(96,  0,   32, 32, 'rpg:air',           0);
+			add(0,   0,   32, 32, 'rpg:grass',         1);
+			add(32,  0,   32, 32, 'rpg:stone',         2);
+			add(64,  0,   32, 32, 'rpg:dirt',          3);
+			add(96,  0,   32, 32, 'rpg:cave',          5);
+			add(448, 287, 32, 32, 'rpg:chest1',        6);
+			add(480, 287, 32, 32, 'rpg:chest2',        7);
+			add(415, 287, 32, 32, 'rpg:inv_icon',     70);
+			add(432, 0,   9,  15, 'rpg:enemy_1',      90);
+			add(441, 0,   9,  15, 'rpg:enemy_2',      90);
+			add(450, 0,   9,  15, 'rpg:player',       90);
+			add(480, 0,   32, 32, 'rpg:sword',       130);
+			add(480, 32,  32, 32, 'rpg:cookie',      131);
+			add(480, 64,  32, 32, 'rpg:poison',      132);
+		};
+		window.onload = ()=>{
+			GameObject.loadData();
+			setInterval(()=>{
+				GameObject.doTick();
+			}, 60);
+			setInterval(()=>{
+				GameObject.render();
+			}, 13);
+			window.onkeydown = (e) => {
+				GameObject.sendKeyEvent(e.keyCode, true);
+			};
+			window.onkeyup = (e) => {
+				GameObject.sendKeyEvent(e.keyCode, false);
+			};
+		};
+	</script>
+</body>
+</html>
