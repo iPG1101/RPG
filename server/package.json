@@ -1,10 +1,10 @@
 {
-  "name": "lance-game",
-  "version": "2.0.0",
+  "name": "RPG",
+  "version": "0.0.1",
   "engines": {
     "node": "6.11.1"
   },
-  "description": "An HTML5 multiplayer game based on Lance",
+  "description": "An html multiplayer RPG",
   "main": "main.js",
   "dependencies": {
     "babel-core": "^6.25.0",
@@ -38,8 +38,8 @@
   },
   "keywords": [
     "game",
+    "rpg",
     "lance",
-    "lance-gg",
     "multiplayer",
     "websockets"
   ],
